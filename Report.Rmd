@@ -1,0 +1,176 @@
+---
+title: "Prediction Assignment Writeup"
+author: "Stefano Emilio Campanini"
+date: "February 27, 2016"
+output: html_document
+---
+
+# Executive Summary - Abstract
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. The goal of this project is to create a model in order to predict the manner in which the exercise is done, starting from the *Weight Lifting Exercises Dataset* . 
+
+# Environment and libs
+
+The Environment, the required libs and optimizations used for parallel processing, are reported in Appendix
+
+```{r, echo=FALSE, message=FALSE}
+library(caret)
+library(ggplot2)
+library(ipred)
+library(randomForest)
+library(doParallel);
+
+rCluster <- makePSOCKcluster(detectCores());
+registerDoParallel(rCluster);
+```
+
+# The Data
+
+The data used is available from the Groupware@LES ( http://groupware.les.inf.puc-rio.br/har), and it is collected asking  to 6 participants to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions. 
+The training data set collect 19622 observations with 160 fields, the outcome is named "classe". 
+The test data set collect 20 observations with 160 fields, the outcome is missed. The outcome of this dataset will be predicted by the model created and submitted for evaluation.
+
+Two data set are created, as reported below, The code used to load these data sets is reported in Appendix.
+
+* *trainingForFitting* , from the fle *pml-training.csv*
+* *testingForResult* , from the fle *pml-testing.csv*
+
+```{r, echo=FALSE}
+trainingForFitting <- read.csv("pml-training.csv")
+testingForResult <- read.csv("pml-testing.csv", colClasses = c(kurtosis_roll_belt="factor", kurtosis_picth_belt="factor", kurtosis_yaw_belt="factor", skewness_roll_belt="factor", skewness_roll_belt.1="factor", skewness_yaw_belt="factor", max_roll_belt="numeric", max_picth_belt="integer", max_yaw_belt="factor", min_roll_belt="numeric", min_pitch_belt="integer", min_yaw_belt="factor", amplitude_roll_belt="numeric", amplitude_pitch_belt="integer", amplitude_yaw_belt="factor", var_total_accel_belt="numeric", avg_roll_belt="numeric", stddev_roll_belt="numeric", var_roll_belt="numeric", avg_pitch_belt="numeric", stddev_pitch_belt="numeric", var_pitch_belt="numeric", avg_yaw_belt="numeric", stddev_yaw_belt="numeric", var_yaw_belt="numeric", var_accel_arm="numeric", avg_roll_arm="numeric", stddev_roll_arm="numeric", var_roll_arm="numeric", avg_pitch_arm="numeric", stddev_pitch_arm="numeric", var_pitch_arm="numeric", avg_yaw_arm="numeric", stddev_yaw_arm="numeric", var_yaw_arm="numeric", kurtosis_roll_arm="factor", kurtosis_picth_arm="factor", kurtosis_yaw_arm="factor", skewness_roll_arm="factor", skewness_pitch_arm="factor", skewness_yaw_arm="factor", max_roll_arm="numeric", max_picth_arm="numeric", max_yaw_arm="integer", min_roll_arm="numeric", min_pitch_arm="numeric", min_yaw_arm="integer", amplitude_roll_arm="numeric", amplitude_pitch_arm="numeric", amplitude_yaw_arm="integer", kurtosis_roll_dumbbell="factor", kurtosis_picth_dumbbell="factor", kurtosis_yaw_dumbbell="factor", skewness_roll_dumbbell="factor", skewness_pitch_dumbbell="factor", skewness_yaw_dumbbell="factor", max_roll_dumbbell="numeric", max_picth_dumbbell="numeric", max_yaw_dumbbell="factor", min_roll_dumbbell="numeric", min_pitch_dumbbell="numeric", min_yaw_dumbbell="factor", amplitude_roll_dumbbell="numeric", amplitude_pitch_dumbbell="numeric", amplitude_yaw_dumbbell="factor", var_accel_dumbbell="numeric", avg_roll_dumbbell="numeric", stddev_roll_dumbbell="numeric", var_roll_dumbbell="numeric", avg_pitch_dumbbell="numeric", stddev_pitch_dumbbell="numeric", var_pitch_dumbbell="numeric", avg_yaw_dumbbell="numeric", stddev_yaw_dumbbell="numeric", var_yaw_dumbbell="numeric", kurtosis_roll_forearm="factor", kurtosis_picth_forearm="factor", kurtosis_yaw_forearm="factor", skewness_roll_forearm="factor", skewness_pitch_forearm="factor", skewness_yaw_forearm="factor", max_roll_forearm="numeric", max_picth_forearm="numeric", max_yaw_forearm="factor", min_roll_forearm="numeric", min_pitch_forearm="numeric", min_yaw_forearm="factor", amplitude_roll_forearm="numeric", amplitude_pitch_forearm="numeric", amplitude_yaw_forearm="factor", total_accel_forearm="integer", var_accel_forearm="numeric", avg_roll_forearm="numeric", stddev_roll_forearm="numeric", var_roll_forearm="numeric", avg_pitch_forearm="numeric", stddev_pitch_forearm="numeric", var_pitch_forearm="numeric", avg_yaw_forearm="numeric", stddev_yaw_forearm="numeric", var_yaw_forearm="numeric"))
+```
+
+The way we apply the Cross Validation in this project is by using the *trainingForFitting* dataset to create the *training* and *testing* data set.
+
+```{r}
+inTrain <- createDataPartition(y=trainingForFitting$classe, p=0.75, list=FALSE)
+training <- trainingForFitting[inTrain, ]
+testing <- trainingForFitting[-inTrain, ]
+```
+
+The *training* dataset is used to do the analysis and for fitting the model, instead the *testing*  dataset is only used to evaluate the quality of the model ( validation ).
+
+The *testingForResult* dataset is used to calculate predictions to be used to answer to the last quiz of the course.
+
+# Data Pre-Processing
+
+## Exploration, Cleaning, Selecting features, and Preprocessing 
+
+In the dataset there are more fields than necessary. Infact, fileds like *timestamps* , *user_name*, *window*, *program_id*, ecc.. that reasonably cannot influence the outcome. So we keep only some measurements produced by sensors. Below are reported the fields we selected as features for the model, and its dimensions.
+
+```{r}
+fieldsToKeep <- c("roll_belt","pitch_belt","yaw_belt","total_accel_belt","gyros_belt_x","gyros_belt_y","gyros_belt_z","accel_belt_x","accel_belt_y","accel_belt_z","magnet_belt_x","magnet_belt_y","magnet_belt_z","roll_arm","pitch_arm","yaw_arm","total_accel_arm","gyros_arm_x","gyros_arm_y","gyros_arm_z","accel_arm_x","accel_arm_y","accel_arm_z","magnet_arm_x","magnet_arm_y","magnet_arm_z","roll_dumbbell","pitch_dumbbell","yaw_dumbbell","total_accel_dumbbell","gyros_dumbbell_x","gyros_dumbbell_y","gyros_dumbbell_z","accel_dumbbell_x","accel_dumbbell_y","accel_dumbbell_z","magnet_dumbbell_x","magnet_dumbbell_y","magnet_dumbbell_z","roll_forearm","pitch_forearm","yaw_forearm","total_accel_forearm","gyros_forearm_x","gyros_forearm_y","gyros_forearm_z","accel_forearm_x","accel_forearm_y","accel_forearm_z","magnet_forearm_x","magnet_forearm_y","magnet_forearm_z", "classe")
+
+filteredTraining <- training[,  colnames(training) %in% fieldsToKeep]
+dim(filteredTraining)
+```
+
+We do not check before how much these features are correlated, supposing some of them can be correlated each each others  we decide to apply PCA preprocessing with .95 threshold for selecting components. This is also useful to reduce the number of predictors.
+
+Also we decide to use K–fold cross–validation using R default K parts, and in order to speedup the model fitting algorithm the features will be “scaled” and “centered” .
+
+The preprocessing for *K–fold*, *center*, *scale* and *pca* , is done during the model fitting using *trainControl* and *train* options, of the  *caret*  package.
+
+# Model Fitting
+
+This is a machine learning supervised classification problem, we choose to use *Random Forest* with parallel processing algorithm, with a number of three lower than default. Here the code
+
+```{r, eval=TRUE}
+set.seed(96)
+ctrl <- trainControl(preProcOptions = list(thresh = 0.95) , method = "cv", allowParallel =TRUE)
+modfit <- train(classe ~ ., 
+   preProcess=c("center", "scale", "pca") , 
+   trControl=ctrl,
+   data = filteredTraining, 
+   method = "rf", ntree = 200)
+```
+
+
+# Model Quality
+
+In appendix it is reported the model *confusion matrix* and the way errors converge. 
+
+## Validation of the Model
+
+In these section, it is reported the model validation against the testing data. 
+```{r}
+filteredTesting <- testing[,  colnames(testing) %in% fieldsToKeep]
+predictions <- predict(modfit, newdata = filteredTesting)
+cm <- confusionMatrix(predictions, filteredTesting$classe)
+```
+
+Here are reported *onfusion Matrix and Statistics* about computed using testing data, as you can see the overall accurancy is about 0.6 with a confidence interval from 0.5008 to 0.6971 .
+
+```{r, echo=FALSE}
+cm
+```
+
+# Results for submission 
+
+We export the results for the submission in a CSV format, the same format of the input data sets. This data will be used to answer to the last quiz of the course. In Appendix is reported the code used.
+
+# Appendix
+
+## Enviroment and libs
+This analysis has been made using R programming language and RStudio IDE, below are reported useful details about the base software environment.
+
+The Hardware is:
+
+* memory size: 15GiB
+* cpu product: Intel(R) Core(TM) i7-3612QM CPU @ 2.10GHz
+
+Interesting software
+```{r}
+sessionInfo()
+```
+
+Libs used
+```{r,eval=FALSE}
+library(caret)
+library(ggplot2)
+library(ipred)
+library(randomForest)
+```
+
+## Performance optimization - Tweaking for parallel processing
+
+The model will use a high number of covariate/predicotrs, so fitting it can be a CPU intensive and long task. it is better to configure R using parallel processing. Here the code used
+
+```{r, eval=FALSE}
+library(doParallel);
+rCluster <- makePSOCKcluster(detectCores());
+registerDoParallel(rCluster);
+```
+
+## Loading the Data
+
+The data is lodaed using read.csv, as you can see there is the need to force the field type for the loading of the test dataset. The read.csv produce fields as *logical* if there are no data, here we forced the types using colClasses in order to assure that the two datasets will be aligned by field-types.
+
+```{r, eval=FALSE}
+trainingForFitting <- read.csv("pml-training.csv")
+testingForResult <- read.csv("pml-testing.csv", colClasses = c(kurtosis_roll_belt="factor", kurtosis_picth_belt="factor", kurtosis_yaw_belt="factor", skewness_roll_belt="factor", skewness_roll_belt.1="factor", skewness_yaw_belt="factor", max_roll_belt="numeric", max_picth_belt="integer", max_yaw_belt="factor", min_roll_belt="numeric", min_pitch_belt="integer", min_yaw_belt="factor", amplitude_roll_belt="numeric", amplitude_pitch_belt="integer", amplitude_yaw_belt="factor", var_total_accel_belt="numeric", avg_roll_belt="numeric", stddev_roll_belt="numeric", var_roll_belt="numeric", avg_pitch_belt="numeric", stddev_pitch_belt="numeric", var_pitch_belt="numeric", avg_yaw_belt="numeric", stddev_yaw_belt="numeric", var_yaw_belt="numeric", var_accel_arm="numeric", avg_roll_arm="numeric", stddev_roll_arm="numeric", var_roll_arm="numeric", avg_pitch_arm="numeric", stddev_pitch_arm="numeric", var_pitch_arm="numeric", avg_yaw_arm="numeric", stddev_yaw_arm="numeric", var_yaw_arm="numeric", kurtosis_roll_arm="factor", kurtosis_picth_arm="factor", kurtosis_yaw_arm="factor", skewness_roll_arm="factor", skewness_pitch_arm="factor", skewness_yaw_arm="factor", max_roll_arm="numeric", max_picth_arm="numeric", max_yaw_arm="integer", min_roll_arm="numeric", min_pitch_arm="numeric", min_yaw_arm="integer", amplitude_roll_arm="numeric", amplitude_pitch_arm="numeric", amplitude_yaw_arm="integer", kurtosis_roll_dumbbell="factor", kurtosis_picth_dumbbell="factor", kurtosis_yaw_dumbbell="factor", skewness_roll_dumbbell="factor", skewness_pitch_dumbbell="factor", skewness_yaw_dumbbell="factor", max_roll_dumbbell="numeric", max_picth_dumbbell="numeric", max_yaw_dumbbell="factor", min_roll_dumbbell="numeric", min_pitch_dumbbell="numeric", min_yaw_dumbbell="factor", amplitude_roll_dumbbell="numeric", amplitude_pitch_dumbbell="numeric", amplitude_yaw_dumbbell="factor", var_accel_dumbbell="numeric", avg_roll_dumbbell="numeric", stddev_roll_dumbbell="numeric", var_roll_dumbbell="numeric", avg_pitch_dumbbell="numeric", stddev_pitch_dumbbell="numeric", var_pitch_dumbbell="numeric", avg_yaw_dumbbell="numeric", stddev_yaw_dumbbell="numeric", var_yaw_dumbbell="numeric", kurtosis_roll_forearm="factor", kurtosis_picth_forearm="factor", kurtosis_yaw_forearm="factor", skewness_roll_forearm="factor", skewness_pitch_forearm="factor", skewness_yaw_forearm="factor", max_roll_forearm="numeric", max_picth_forearm="numeric", max_yaw_forearm="factor", min_roll_forearm="numeric", min_pitch_forearm="numeric", min_yaw_forearm="factor", amplitude_roll_forearm="numeric", amplitude_pitch_forearm="numeric", amplitude_yaw_forearm="factor", total_accel_forearm="integer", var_accel_forearm="numeric", avg_roll_forearm="numeric", stddev_roll_forearm="numeric", var_roll_forearm="numeric", avg_pitch_forearm="numeric", stddev_pitch_forearm="numeric", var_pitch_forearm="numeric", avg_yaw_forearm="numeric", stddev_yaw_forearm="numeric", var_yaw_forearm="numeric"))
+```
+
+## Model Quality
+
+Here, it is reported the error rates of the model and the confusion matrix.
+```{r}
+modfit$finalModel
+```
+
+Thre plot shows how the erorrs change respect the number of trees, as you can notice it converged also with less than 500 trees ( default value ).
+```{r}
+plot(modfit$finalModel)
+```
+
+## Results for submission 
+
+We export the results for the submission in a CSV format, the same format of the input data sets. Here the code used. This data will be used to answer to the last quiz of the course.
+```{r}
+filteredTestingForResult <- testingForResult[,  colnames(testingForResult) %in% fieldsToKeep]
+predictions4Eval <- predict(modfit, newdata = filteredTestingForResult)
+predictions4EvalDF <- data.frame(predictions4Eval)
+predictions4EvalDF$classe <- predictions4EvalDF$predictions4Eval
+predictions4EvalDF$predictions4Eval <- NULL
+write.csv(x=predictions4EvalDF, "test-result-4-eval.csv", row.names=FALSE)
+```
