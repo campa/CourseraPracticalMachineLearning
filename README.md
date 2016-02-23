@@ -6,6 +6,6 @@ This is the assignment for the course  <a href="https://www.coursera.org/learn/p
 * The *Report.html* contains the HTML source of the Report
 * The *Report.Rmd* file contains the *Knitr* report 
 * The *test-result-4-eval.csv* the results for the Quiz
-* The other csv files are given as input, taken from the ( <a href="http://groupware.les.inf.puc-rio.br/har"> Groupware@LES</a>
+* The other csv files are given as input, taken from the <a href="http://groupware.les.inf.puc-rio.br/har"> Groupware@LES</a>
 
 
